@@ -2,49 +2,49 @@
 #import <objc/runtime.h>
 #import <UIKit/UIKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <mach-o/dyld.h>
 
 // ==========================================
-// 1. A PONTE DO MOTOR
+// 1. AS FUNÇÕES OCULTAS DO 3105 (Via Offset)
 // ==========================================
-@interface ATCGlue : NSObject
-+ (id)sharedInstance;
-@end
+// Pega o endereço base do app na memória para calcular os offsets
+uintptr_t get_base_address() {
+    return _dyld_get_image_vmaddr_slide(0);
+}
 
-void AplicarPatchEngine(NSString *patchName, NSArray *files, NSArray *data) {
-    Class atcClass = NSClassFromString(@"ATCGlue");
-    if (!atcClass) return;
-    id atcInstance = [(id)atcClass sharedInstance];
-    
-    NSString *ip = @"1.0.7.0"; 
-    NSString *pairingPath = [NSString stringWithFormat:@"%@/Documents/AirLift/.pairingplist", NSHomeDirectory()];
-    NSString *targetDir = @"/var/mobile/Containers/Data/Application/ALVO/Documents"; // Precisamos descobrir o alvo
+// Assinatura baseada no que o Ghidra mostrou na função FUN_10000ec90
+typedef BOOL (*ImportAndInjectFunc)(NSData *patchData);
 
-    SEL selector = NSSelectorFromString(@"injectPatchDirectoryWithDeviceIP:pairingPath:targetDirectory:directoryName:fileNames:data:error:");
+void ExecutarImportacaoOriginal(NSString *caminhoDoArquivo) {
+    uintptr_t base = get_base_address();
     
-    if ([atcInstance respondsToSelector:selector]) {
-        NSMethodSignature *signature = [atcInstance methodSignatureForSelector:selector];
-        NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-        [invocation setTarget:atcInstance];
-        [invocation setSelector:selector];
-        
-        NSError *__autoreleasing error = nil;
-        NSError *__autoreleasing *errorPtr = &error;
-        
-        [invocation setArgument:&ip atIndex:2];
-        [invocation setArgument:&pairingPath atIndex:3];
-        [invocation setArgument:&targetDir atIndex:4];
-        [invocation setArgument:&patchName atIndex:5];
-        [invocation setArgument:&files atIndex:6];
-        [invocation setArgument:&data atIndex:7];
-        [invocation setArgument:&errorPtr atIndex:8];
-        
-        [invocation invoke];
-        NSLog(@"[ZERO] Injeção disparada para: %@", patchName);
+    // O offset da FUN_10000ec90 (Subtraindo o endereço base padrão do binário 0x100000000)
+    uintptr_t funcAddr = base + (0x10000ec90 - 0x100000000);
+    
+    // Lê o arquivo que o usuário selecionou
+    NSData *fileData = [NSData dataWithContentsOfFile:caminhoDoArquivo];
+    if (!fileData) {
+        NSLog(@"[ZERO] Erro: Nao foi possivel ler o arquivo.");
+        return;
+    }
+    
+    NSLog(@"[ZERO] Chamando o motor original de importacao...");
+    
+    // Transforma o endereço em uma função C e chama
+    ImportAndInjectFunc importFunc = (ImportAndInjectFunc)funcAddr;
+    
+    // Executa! A função vai descompactar, validar o SHA-256 e injetar sozinha.
+    BOOL sucesso = importFunc(fileData);
+    
+    if (sucesso) {
+        NSLog(@"[ZERO] Importacao e injecao realizadas com sucesso pelo motor original!");
+    } else {
+        NSLog(@"[ZERO] O motor original falhou ao importar.");
     }
 }
 
 // ==========================================
-// 2. A INTERFACE
+// 2. A INTERFACE (UI)
 // ==========================================
 @interface CustomPatchCell : UITableViewCell
 @property (nonatomic, strong) UILabel *titleLabel;
@@ -103,6 +103,7 @@ void AplicarPatchEngine(NSString *patchName, NSArray *files, NSArray *data) {
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSMutableArray *patches;
 @property (nonatomic, strong) NSMutableDictionary *switchStates;
+@property (nonatomic, strong) NSMutableDictionary *patchPaths;
 @end
 
 @implementation VoltPatchesViewController
@@ -110,9 +111,9 @@ void AplicarPatchEngine(NSString *patchName, NSArray *files, NSArray *data) {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor colorWithRed:0.15 green:0.05 blue:0.05 alpha:1.0];
     
-    // LISTA VAZIA! Só vai popular quando importar.
     self.patches = [NSMutableArray array]; 
     self.switchStates = [NSMutableDictionary dictionary];
+    self.patchPaths = [NSMutableDictionary dictionary];
     
     self.title = @"Patches VOLT CHATS";
     [self.navigationController.navigationBar setTitleTextAttributes:@{NSForegroundColorAttributeName:[UIColor whiteColor]}];
@@ -131,21 +132,25 @@ void AplicarPatchEngine(NSString *patchName, NSArray *files, NSArray *data) {
 }
 
 - (void)importPatch {
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeZIP, UTTypeFolder, UTTypeData]];
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeItem]];
     picker.delegate = self;
+    picker.allowsMultipleSelection = NO;
     [self presentViewController:picker animated:YES completion:nil];
 }
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     if (urls.count > 0) {
-        NSString *fileName = urls[0].lastPathComponent;
+        NSURL *fileURL = urls[0];
+        [fileURL startAccessingSecurityScopedResource];
+        
+        NSString *fileName = fileURL.lastPathComponent;
         NSString *patchName = [fileName stringByDeletingPathExtension];
         
         [self.patches insertObject:patchName atIndex:0];
+        [self.patchPaths setObject:fileURL.path forKey:patchName];
         [self.tableView reloadData];
-        NSLog(@"[ZERO] Patch importado: %@", patchName);
         
-        // NO FUTURO: Aqui a gente copia o arquivo para a pasta do app.
+        [fileURL stopAccessingSecurityScopedResource];
     }
 }
 
@@ -175,10 +180,16 @@ void AplicarPatchEngine(NSString *patchName, NSArray *files, NSArray *data) {
     [self.switchStates setObject:@(sender.isOn) forKey:patchName];
     
     if (sender.isOn) {
-        // Aqui a gente chama o motor
-        AplicarPatchEngine(patchName, @[], @[]); 
+        // Pega o caminho do arquivo importado e manda para o motor original
+        NSString *path = self.patchPaths[patchName];
+        if (path) {
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                ExecutarImportacaoOriginal(path);
+            });
+        }
     } else {
-        NSLog(@"[ZERO] Desligado: %@", patchName);
+        // Ainda não mapeamos a função exata de restore para chamar via offset.
+        NSLog(@"[ZERO] Restore solicitado. (Em implementação)");
     }
 }
 @end
