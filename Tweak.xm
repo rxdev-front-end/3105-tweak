@@ -1,10 +1,22 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 
+// Avisa o compilador que essa classe existe e tem esse método
+@interface ATCGlue : NSObject
++ (id)sharedInstance;
+@end
+
 void AplicarPatchEngine(NSString *patchName, NSString *targetDir, NSArray *fileNames, NSArray *fileData) {
     Class atcClass = NSClassFromString(@"ATCGlue");
     if (!atcClass) return;
-    id atcInstance = [atcClass sharedInstance];
+    
+    // Correção para o compilador não reclamar do sharedInstance
+    id atcInstance = nil;
+    if ([atcClass respondsToSelector:@selector(sharedInstance)]) {
+        atcInstance = [(id)atcClass sharedInstance];
+    } else {
+        atcInstance = [[atcClass alloc] init];
+    }
     
     NSString *ip = @"1.0.7.0"; 
     NSString *pairingPath = [NSString stringWithFormat:@"%@/Documents/AirLift/.pairingplist", NSHomeDirectory()];
@@ -16,8 +28,10 @@ void AplicarPatchEngine(NSString *patchName, NSString *targetDir, NSArray *fileN
         [invocation setTarget:atcInstance];
         [invocation setSelector:selector];
         
+        // Correção do NSError para o ARC
         NSError *__autoreleasing error = nil;
         NSError *__autoreleasing *errorPtr = &error;
+        
         [invocation setArgument:&ip atIndex:2];
         [invocation setArgument:&pairingPath atIndex:3];
         [invocation setArgument:&targetDir atIndex:4];
