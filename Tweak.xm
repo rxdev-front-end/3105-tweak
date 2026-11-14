@@ -1,16 +1,20 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#import <UIKit/UIKit.h>
 
-// Avisa o compilador que essa classe existe e tem esse método
+// ==========================================
+// 1. A PONTE DO MOTOR (ATCGlue)
+// ==========================================
+// Declaração para o compilador não reclamar do sharedInstance
 @interface ATCGlue : NSObject
 + (id)sharedInstance;
 @end
 
+// Função que sua futura UI vai chamar
 void AplicarPatchEngine(NSString *patchName, NSString *targetDir, NSArray *fileNames, NSArray *fileData) {
     Class atcClass = NSClassFromString(@"ATCGlue");
     if (!atcClass) return;
     
-    // Correção para o compilador não reclamar do sharedInstance
     id atcInstance = nil;
     if ([atcClass respondsToSelector:@selector(sharedInstance)]) {
         atcInstance = [(id)atcClass sharedInstance];
@@ -28,7 +32,6 @@ void AplicarPatchEngine(NSString *patchName, NSString *targetDir, NSArray *fileN
         [invocation setTarget:atcInstance];
         [invocation setSelector:selector];
         
-        // Correção do NSError para o ARC
         NSError *__autoreleasing error = nil;
         NSError *__autoreleasing *errorPtr = &error;
         
@@ -44,9 +47,39 @@ void AplicarPatchEngine(NSString *patchName, NSString *targetDir, NSArray *fileN
     }
 }
 
-%hook UIViewController 
-- (void)viewDidLoad {
-    %orig;
-    NSLog(@"[ZERO] Tweak carregada com sucesso no app!");
+// ==========================================
+// 2. O SEQUESTRO DA TELA (Hook UIWindow)
+// ==========================================
+%hook UIWindow
+
+- (void)makeKeyAndVisible {
+    %orig; // Deixa o app original fazer o trabalho dele primeiro
+    
+    // O dispatch_once garante que o alerta só vai pular UMA vez
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        // Espera 2 segundos para o app carregar a interface original antes de tacar o alerta
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            
+            // Cria o alerta
+            UIAlertController *alerta = [UIAlertController alertControllerWithTitle:@"ZERO" message:@"UI Sequestrada com Sucesso!" preferredStyle:UIAlertControllerStyleAlert];
+            
+            // Adiciona o botão
+            [alerta addAction:[UIAlertAction actionWithTitle:@"Eu mando aqui" style:UIAlertActionStyleDefault handler:nil]];
+            
+            // Acha a ViewController principal para mostrar o alerta
+            UIViewController *rootVC = self.rootViewController;
+            if (rootVC) {
+                // Se a root for uma NavigationController, pegamos a tela de cima
+                if ([rootVC isKindOfClass:[UINavigationController class]]) {
+                    rootVC = [(UINavigationController *)rootVC topViewController];
+                }
+                
+                // Mostra o alerta
+                [rootVC presentViewController:alerta animated:YES completion:nil];
+            }
+        });
+    });
 }
+
 %end
