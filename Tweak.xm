@@ -7,39 +7,35 @@
 // ==========================================
 // 1. AS FUNÇÕES OCULTAS DO 3105 (Via Offset)
 // ==========================================
-// Pega o endereço base do app na memória para calcular os offsets
-uintptr_t get_base_address() {
-    return _dyld_get_image_vmaddr_slide(0);
+// Pega o endereço base real da imagem do executável na memória
+uintptr_t get_real_base_address() {
+    return (uintptr_t)_dyld_get_image_header(0);
 }
 
-// Assinatura baseada no que o Ghidra mostrou na função FUN_10000ec90
+// Assinatura da função FUN_10000ec90 do Ghidra (recebe um objeto/ponteiro)
 typedef BOOL (*ImportAndInjectFunc)(NSData *patchData);
 
 void ExecutarImportacaoOriginal(NSString *caminhoDoArquivo) {
-    uintptr_t base = get_base_address();
+    uintptr_t base = get_real_base_address();
     
-    // O offset da FUN_10000ec90 (Subtraindo o endereço base padrão do binário 0x100000000)
-    uintptr_t funcAddr = base + (0x10000ec90 - 0x100000000);
+    // O offset da FUN_10000ec90 (0x10000ec90 - 0x100000000)
+    uintptr_t funcAddr = base + 0xec90; 
     
-    // Lê o arquivo que o usuário selecionou
     NSData *fileData = [NSData dataWithContentsOfFile:caminhoDoArquivo];
     if (!fileData) {
-        NSLog(@"[ZERO] Erro: Nao foi possivel ler o arquivo.");
+        NSLog(@"[ZERO] Erro: Nao foi possivel ler o arquivo em %@", caminhoDoArquivo);
         return;
     }
     
-    NSLog(@"[ZERO] Chamando o motor original de importacao...");
+    NSLog(@"[ZERO] Chamando o motor original de importacao via Offset...");
     
-    // Transforma o endereço em uma função C e chama
     ImportAndInjectFunc importFunc = (ImportAndInjectFunc)funcAddr;
-    
-    // Executa! A função vai descompactar, validar o SHA-256 e injetar sozinha.
     BOOL sucesso = importFunc(fileData);
     
     if (sucesso) {
         NSLog(@"[ZERO] Importacao e injecao realizadas com sucesso pelo motor original!");
     } else {
-        NSLog(@"[ZERO] O motor original falhou ao importar.");
+        NSLog(@"[ZERO] O motor original retornou falha na importacao.");
     }
 }
 
@@ -58,6 +54,7 @@ void ExecutarImportacaoOriginal(NSString *caminhoDoArquivo) {
     if (self) {
         self.backgroundColor = [UIColor clearColor];
         self.selectionStyle = UITableViewCellSelectionStyleNone;
+        
         UIView *card = [[UIView alloc] init];
         card.backgroundColor = [UIColor colorWithRed:0.2 green:0.1 blue:0.1 alpha:1.0];
         card.layer.cornerRadius = 10;
@@ -87,10 +84,13 @@ void ExecutarImportacaoOriginal(NSString *caminhoDoArquivo) {
             [card.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-4],
             [card.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],
             [card.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16],
+            
             [_titleLabel.topAnchor constraintEqualToAnchor:card.topAnchor constant:12],
             [_titleLabel.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
+            
             [_subtitleLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:4],
             [_subtitleLabel.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
+            
             [_toggleSwitch.centerYAnchor constraintEqualToAnchor:card.centerYAnchor],
             [_toggleSwitch.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16]
         ]];
@@ -120,7 +120,7 @@ void ExecutarImportacaoOriginal(NSString *caminhoDoArquivo) {
     self.navigationController.navigationBar.barTintColor = [UIColor colorWithRed:0.15 green:0.05 blue:0.05 alpha:1.0];
     self.navigationController.navigationBar.tintColor = [UIColor redColor];
     
-    UIBarButtonItem *importBtn = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(importPatch)];
+    UIBarButtonItem *importBtn = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemAdd target:self action:@selector(importPatch)];
     self.navigationItem.rightBarButtonItem = importBtn;
     
     self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStylePlain];
@@ -132,25 +132,40 @@ void ExecutarImportacaoOriginal(NSString *caminhoDoArquivo) {
 }
 
 - (void)importPatch {
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeItem]];
-    picker.delegate = self;
-    picker.allowsMultipleSelection = NO;
-    [self presentViewController:picker animated:YES completion:nil];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSLog(@"[ZERO] Tentando abrir o seletor de arquivos...");
+        
+        UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeItem, UTTypeData, UTTypeFolder] asCopy:YES];
+        picker.delegate = self;
+        picker.allowsMultipleSelection = NO;
+        
+        [self presentViewController:picker animated:YES completion:nil];
+    });
 }
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    NSLog(@"[ZERO] Seletor fechou. Arquivos selecionados: %lu", (unsigned long)urls.count);
+    
     if (urls.count > 0) {
         NSURL *fileURL = urls[0];
-        [fileURL startAccessingSecurityScopedResource];
+        BOOL access = [fileURL startAccessingSecurityScopedResource];
+        NSLog(@"[ZERO] Acesso ao arquivo liberado? %d", access);
         
         NSString *fileName = fileURL.lastPathComponent;
         NSString *patchName = [fileName stringByDeletingPathExtension];
         
+        NSLog(@"[ZERO] Importando patch: %@", patchName);
+        
         [self.patches insertObject:patchName atIndex:0];
         [self.patchPaths setObject:fileURL.path forKey:patchName];
-        [self.tableView reloadData];
         
-        [fileURL stopAccessingSecurityScopedResource];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self.tableView reloadData];
+        });
+        
+        if (access) [fileURL stopAccessingSecurityScopedResource];
+    } else {
+        NSLog(@"[ZERO] Nenhum arquivo selecionado ou cancelado.");
     }
 }
 
@@ -180,7 +195,6 @@ void ExecutarImportacaoOriginal(NSString *caminhoDoArquivo) {
     [self.switchStates setObject:@(sender.isOn) forKey:patchName];
     
     if (sender.isOn) {
-        // Pega o caminho do arquivo importado e manda para o motor original
         NSString *path = self.patchPaths[patchName];
         if (path) {
             dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -188,7 +202,6 @@ void ExecutarImportacaoOriginal(NSString *caminhoDoArquivo) {
             });
         }
     } else {
-        // Ainda não mapeamos a função exata de restore para chamar via offset.
         NSLog(@"[ZERO] Restore solicitado. (Em implementação)");
     }
 }
