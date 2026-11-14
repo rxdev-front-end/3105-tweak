@@ -7,12 +7,10 @@
 // ==========================================
 // 1. AS FUNÇÕES OCULTAS DO 3105 (Via Offset)
 // ==========================================
-// Pega o endereço base real da imagem do executável na memória
 uintptr_t get_real_base_address() {
     return (uintptr_t)_dyld_get_image_header(0);
 }
 
-// Assinatura da função FUN_10000ec90 do Ghidra (recebe um objeto/ponteiro)
 typedef BOOL (*ImportAndInjectFunc)(NSData *patchData);
 
 void ExecutarImportacaoOriginal(NSString *caminhoDoArquivo) {
@@ -120,7 +118,8 @@ void ExecutarImportacaoOriginal(NSString *caminhoDoArquivo) {
     self.navigationController.navigationBar.barTintColor = [UIColor colorWithRed:0.15 green:0.05 blue:0.05 alpha:1.0];
     self.navigationController.navigationBar.tintColor = [UIColor redColor];
     
-    UIBarButtonItem *importBtn = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemAdd target:self action:@selector(importPatch)];
+    // AQUI ESTAVA O ERRO: UIBarButtonSystemItemAdd
+    UIBarButtonItem *importBtn = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(importPatch)];
     self.navigationItem.rightBarButtonItem = importBtn;
     
     self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStylePlain];
