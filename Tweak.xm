@@ -16,8 +16,8 @@ void AplicarPatchEngine(NSString *patchName, NSString *targetDir, NSArray *fileN
         [invocation setTarget:atcInstance];
         [invocation setSelector:selector];
         
-        NSError *error = nil;
-        NSError **errorPtr = &error;
+        NSError *__autoreleasing error = nil;
+        NSError *__autoreleasing *errorPtr = &error;
         [invocation setArgument:&ip atIndex:2];
         [invocation setArgument:&pairingPath atIndex:3];
         [invocation setArgument:&targetDir atIndex:4];
